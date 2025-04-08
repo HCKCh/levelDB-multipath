@@ -19,6 +19,13 @@
 #include <deque>
 #include <limits>
 #include <set>
+
+
+#include <libpmem.h>
+#include <stdexcept>
+#include <iostream>
+#include <filesystem>
+
 #include "leveldb/env.h"
 #include "leveldb/slice.h"
 #include "port/port.h"
@@ -27,6 +34,9 @@
 #include "util/mutexlock.h"
 #include "util/posix_logger.h"
 #include "util/env_posix_test_helper.h"
+
+
+
 
 // HAVE_FDATASYNC is defined in the auto-generated port_config.h, which is
 // included by port_stdcxx.h.
@@ -114,6 +124,7 @@ class PosixSequentialFile: public SequentialFile {
  private:
   std::string filename_;
   int fd_;
+// read 接口从当前位置顺序的读出 n 字节数据，而 skip 接口则顺序向后跳过 n 字节
 
  public:
   PosixSequentialFile(const std::string& fname, int fd)
@@ -145,7 +156,58 @@ class PosixSequentialFile: public SequentialFile {
   }
 };
 
+// PMEM 
+class PmemSequentialFile final : public leveldb::SequentialFile {
+
+public:
+    PmemSequentialFile(const std::string& filename)
+        : filename_(filename) {
+        
+        pmem_addr_ = pmem_map_file(filename_.c_str(), 0, PMEM_FILE_CREATE,
+                                   0666, &mapped_len_, &is_pmem_);
+        if(pmem_addr_ == nullptr) {
+            // handle error: you could throw an exception or set an internal status variable
+            //throw std::runtime_error("Failed to map file to PMEM");
+            printf("Failed to map file to PMEM");
+        }
+    }
+
+    ~PmemSequentialFile() override {
+        pmem_unmap(pmem_addr_, mapped_len_);
+    }
+
+    leveldb::Status Read(size_t n, leveldb::Slice* result, char* scratch) override {
+        if(position_ + n > mapped_len_) {
+            n = mapped_len_ - position_; // adjust to avoid reading past end
+        }
+
+        memcpy(scratch, static_cast<char*>(pmem_addr_) + position_, n);
+        *result = leveldb::Slice(scratch, n);
+        
+        position_ += n;
+        return leveldb::Status::OK();
+    }
+
+    leveldb::Status Skip(uint64_t n) override {
+        if(position_ + n > mapped_len_) {
+            return leveldb::Status::InvalidArgument("Skip beyond file end");
+        }
+        
+        position_ += n;
+        return leveldb::Status::OK();
+    }
+private:
+    std::string filename_;
+    void* pmem_addr_;
+    size_t mapped_len_;
+    int is_pmem_;
+    uint64_t position_ = 0;    
+};
+
 // pread() based random-access
+// 有两种 random-access 文件，分别是 PosixRandomAccessFile 和 PosixMmapReadableFile
+// 当打开的内存映射文件达到指定数量的时候，后续的随机访问文件只能使用 PosixRandomAccessFile 打开。
+
 class PosixRandomAccessFile: public RandomAccessFile {
  private:
   std::string filename_;
@@ -170,7 +232,7 @@ class PosixRandomAccessFile: public RandomAccessFile {
       limiter_->Release();
     }
   }
-
+  
   virtual Status Read(uint64_t offset, size_t n, Slice* result,
                       char* scratch) const {
     int fd = fd_;
@@ -195,8 +257,50 @@ class PosixRandomAccessFile: public RandomAccessFile {
     return s;
   }
 };
+//PMEM
+class PmemRandomAccessFile final : public RandomAccessFile {
+public:
+  // The constructor takes ownership of the mapped PMEM region.
+  PmemRandomAccessFile(std::string filename, size_t length)
+    : pmem_base_(nullptr),
+      filename_(std::move(filename)),
+      length_(length) {
+
+    pmem_base_ = (char*)pmem_map_file(filename_.c_str(), 0, PMEM_FILE_EXCL, 0666, &length_, &is_pmem_);
+    if (pmem_base_ == nullptr) {
+      //throw std::runtime_error("Failed to map the file to PMEM");
+      printf("Failed to map the file to PMEM");
+    }
+  }
+
+  ~PmemRandomAccessFile() override {
+    if (pmem_base_) {
+      pmem_unmap(pmem_base_, length_);
+    }
+  }
+
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const override {
+    if (offset + n > length_) {
+      *result = Slice();
+      return PosixError(filename_, EINVAL);
+    }
+
+    memcpy(scratch, pmem_base_ + offset, n);
+    *result = Slice(scratch, n);
+    return Status::OK();
+  }
+
+private:
+  char* pmem_base_;
+  const std::string filename_;
+  size_t length_;
+  int is_pmem_;
+};
 
 // mmap() based random-access
+// 內存充足時 直接將資料map進去
+// PosixMmapReadableFile 使用了内存映射文件来实现对于文件的随机访问
+
 class PosixMmapReadableFile: public RandomAccessFile {
  private:
   std::string filename_;
@@ -228,6 +332,107 @@ class PosixMmapReadableFile: public RandomAccessFile {
     }
     return s;
   }
+};
+
+ //PMEM
+class PmemMmapReadableFile final : public RandomAccessFile {
+private:
+  char* pmem_base_;
+  size_t length_;
+  int is_pmem_;
+  std::string filename_;
+
+public:
+  PmemMmapReadableFile(const std::string& filename, size_t length) 
+      : filename_(filename), length_(length) {
+      
+      // Map the file to PMEM
+      pmem_base_ = (char*)pmem_map_file(filename.c_str(), 0, PMEM_FILE_EXCL, 0666, &length_, &is_pmem_);
+      if (pmem_base_ == nullptr) {
+          //throw std::runtime_error("Failed to map the file to PMEM");
+          printf("Failed to map the file to PMEM");
+      }
+  }
+
+  ~PmemMmapReadableFile() override {
+      if (pmem_base_) {
+          pmem_unmap(pmem_base_, length_);
+      }
+  }
+
+  Status Read(uint64_t offset, size_t n, Slice* result, char* scratch) const override {
+      if (offset + n > length_) {
+          *result = Slice();
+          return PosixError(filename_, EINVAL);
+      }
+      memcpy(scratch, pmem_base_ + offset, n);
+      *result = Slice(scratch, n);
+      return Status::OK();
+  }
+};
+
+//PMEM v1
+class PmemWritableFile final : public WritableFile {
+public:
+  PmemWritableFile(const std::string& filename, size_t length)
+      : filename_(filename),
+        length_(length),
+        //pmem_base_(nullptr),
+        pos_(0) 
+        {
+
+    size_t mapped_len;
+    int is_pmem;
+
+    pmem_base_ = static_cast<char*>(pmem_map_file(filename.c_str(), length,
+                                                 PMEM_FILE_CREATE, 0666, &mapped_len, &is_pmem));
+
+    if (pmem_base_ == nullptr) {
+      throw std::runtime_error("Failed to map the file to PMEM");
+    }
+  }
+
+  ~PmemWritableFile() override {
+    if (pmem_base_) {
+      pmem_unmap(pmem_base_, length_);
+    }
+  }
+
+  Status Append(const Slice& data) override {
+    size_t write_size = data.size();
+    const char* write_data = data.data();
+
+    if (pos_ + write_size > length_) {
+      return Status::IOError("Exceeds file size");
+    }
+
+    memcpy(pmem_base_ + pos_, write_data, write_size);
+    pmem_persist(pmem_base_ + pos_, write_size);
+    pos_ += write_size;
+
+    return Status::OK();
+  }
+
+  Status Close() override {
+    return Status::OK();  // pmem_unmap is handled in the destructor
+  }
+
+  Status Flush() override {
+    return Status::OK();  // Data is already persisted
+  }
+  
+
+  Status Sync() override {
+    pmem_persist(pmem_base_, pos_);
+    return Status::OK();
+  }
+
+
+private:
+  char* pmem_base_;
+  const std::string filename_;
+  const size_t length_;
+  size_t pos_;
 };
 
 class PosixWritableFile : public WritableFile {
@@ -401,60 +606,210 @@ class PosixEnv : public Env {
     abort();
   }
 
+  //PMEM
+
+bool isFileInDirectory(const std::string& filepath, const std::string& directory) {
+    try {
+        std::filesystem::path file_path(filepath);
+        std::filesystem::path dir_path(directory);
+
+        // Canonicalize the paths (i.e., absolute path, with symlinks resolved and ".." or "." elements removed)
+        file_path = std::filesystem::canonical(file_path);
+        dir_path = std::filesystem::canonical(dir_path);
+
+        // Check if the file's path starts with the directory's path
+        return file_path.string().find(dir_path.string()) == 0;
+
+    } catch (const std::filesystem::filesystem_error& e) {
+        //std::cerr << "Filesystem error: " << e.what() << std::endl;
+        //std::cerr << "Error accessing file: " << filepath << " or directory: " << directory << std::endl;
+        
+        return false;
+    }
+}
+bool IsFileInPmemDir(const std::string& filepath, const std::string& pmemDirPath) {
+    try {
+        std::filesystem::path file_path(filepath);
+        std::filesystem::path pmem_path(pmemDirPath);
+
+        if (!std::filesystem::exists(file_path)) {
+            //std::cerr << "File does not exist: " << filepath << std::endl;
+            return false;
+        }
+
+        std::string relativeFilePath = std::filesystem::relative(file_path, pmem_path).string();
+
+        
+        if (relativeFilePath.find("..") != 0) {
+            return true; 
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        //std::cerr << "Filesystem error: " << e.what() << std::endl;
+    }
+    return false;
+}
+bool IsPmemFile(const std::string& fname) {
+    const std::string pmemDir = "/home/usertwo/test/dbtest/";
+    
+    if (fname.find(".ldb") != std::string::npos) { 
+       // std::cout << "Checking if file: " << fname << " is in PMEM directory..." << std::endl;
+        //bool inDir = isFileInDirectory(fname, pmemDir);
+        bool inDir = IsFileInPmemDir(fname, pmemDir);
+       // std::cout << "File is " << (inDir ? "" : "not ") << "in PMEM directory." << std::endl;
+        return inDir;
+    }
+    //std::cout << "File: " << fname << " does not have '.ldb' extension." << std::endl;
+    return false;
+}
+
+
+
+  //PMEM
   virtual Status NewSequentialFile(const std::string& fname,
-                                   SequentialFile** result) {
-
-    //zjc 20180507
-    time ( &rawtime );
-    timeinfo = localtime ( &rawtime );
+                                 SequentialFile** result) {
+   
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
     strftime(time_buf, 30, "%x %X", timeinfo);
-    fprintf(log_fp, "[jc_log %s] SEQ access [%s] file number\n", time_buf, fname.c_str());
+    //fprintf(log_fp, "[jc_log %s] SEQ access [%s] file number\n", time_buf, fname.c_str());
 
-    int fd = open(fname.c_str(), O_RDONLY);
-    if (fd < 0) {
-      *result = nullptr;
-      return PosixError(fname, errno);
+    if (IsPmemFile(fname)) {
+        //printf("Use PM sequential read\n");
+        *result = new PmemSequentialFile(fname);
+        if (*result) {
+            return Status::OK();
+        } else {
+            return Status::IOError("Failed to create PmemSequentialFile\n");
+        }
     } else {
-      *result = new PosixSequentialFile(fname, fd);
-      return Status::OK();
+        
+        //printf("Attempting to open file: %s\n", fname.c_str());
+
+        int fd = open(fname.c_str(), O_RDONLY);
+        if (fd < 0) {
+            *result = nullptr;
+            return PosixError(fname, errno);
+        } else {
+            *result = new PosixSequentialFile(fname, fd);
+            return Status::OK();
+        }
     }
   }
 
-  virtual Status NewRandomAccessFile(const std::string& fname,
-                                     RandomAccessFile** result) {
 
-    //zjc 20180507
-    time ( &rawtime );
-    timeinfo = localtime ( &rawtime );
+  // virtual Status NewSequentialFile(const std::string& fname,
+  //                                  SequentialFile** result) {
+
+  //   //zjc 20180507
+  //   time ( &rawtime );
+  //   timeinfo = localtime ( &rawtime );
+  //   strftime(time_buf, 30, "%x %X", timeinfo);
+  //   fprintf(log_fp, "[jc_log %s] SEQ access [%s] file number\n", time_buf, fname.c_str());
+
+  //   int fd = open(fname.c_str(), O_RDONLY);
+  //   if (fd < 0) {
+  //     *result = nullptr;
+  //     return PosixError(fname, errno);
+  //   } else {
+  //     *result = new PosixSequentialFile(fname, fd);
+      
+  //     return Status::OK();
+  //   }
+  // }
+
+  //PMEM
+virtual Status NewRandomAccessFile(const std::string& fname,
+                                   RandomAccessFile** result) {
+  
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
     strftime(time_buf, 30, "%x %X", timeinfo);
     count_rndfile++;
-    fprintf(log_fp, "[jc_log %s] RANDOM access [%s] file number %d\n", time_buf, fname.c_str(),  count_rndfile);
+    //fprintf(log_fp, "[jc_log %s] RANDOM access [%s] file number %d\n", time_buf, fname.c_str(), count_rndfile);
 
     *result = nullptr;
+
+    if (IsPmemFile(fname)) {
+        uint64_t size;
+        Status s = GetFileSize(fname, &size);
+        if (s.ok()) {
+            //printf("Use PMEM Mmap read\n");
+            *result = new PmemMmapReadableFile(fname, size);
+            // printf("Use PM Random read\n");
+            // *result = new PmemRandomAccessFile(fname, size);
+
+            if (*result) {
+                return Status::OK();
+            } else {
+                return Status::IOError("Failed to create PmemMapAccessFile\n");
+            }
+        }
+        return s;
+    }
+
     Status s;
     int fd = open(fname.c_str(), O_RDONLY);
     if (fd < 0) {
-      s = PosixError(fname, errno);
+        s = PosixError(fname, errno);
     } else if (mmap_limit_.Acquire()) {
-      uint64_t size;
-      s = GetFileSize(fname, &size);
-      if (s.ok()) {
-        void* base = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
-        if (base != MAP_FAILED) {
-          *result = new PosixMmapReadableFile(fname, base, size, &mmap_limit_);
-        } else {
-          s = PosixError(fname, errno);
+        uint64_t size;
+        s = GetFileSize(fname, &size);
+        if (s.ok()) {
+            void* base = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+            if (base != MAP_FAILED) {
+                *result = new PosixMmapReadableFile(fname, base, size, &mmap_limit_);
+                printf("Use  map read\n");
+            } else {
+                s = PosixError(fname, errno);
+            }
         }
-      }
-      close(fd);
-      if (!s.ok()) {
-        mmap_limit_.Release();
-      }
+        close(fd);
+        if (!s.ok()) {
+            mmap_limit_.Release();
+        }
     } else {
-      *result = new PosixRandomAccessFile(fname, fd, &fd_limit_);
+        *result = new PosixRandomAccessFile(fname, fd, &fd_limit_);
     }
     return s;
-  }
+}
+
+
+  
+  // virtual Status NewRandomAccessFile(const std::string& fname,
+  //                                    RandomAccessFile** result) {
+
+  //   //zjc 20180507
+  //   time ( &rawtime );
+  //   timeinfo = localtime ( &rawtime );
+  //   strftime(time_buf, 30, "%x %X", timeinfo);
+  //   count_rndfile++;
+  //   fprintf(log_fp, "[jc_log %s] RANDOM access [%s] file number %d\n", time_buf, fname.c_str(),  count_rndfile);
+
+  //   *result = nullptr;
+  //   Status s;
+  //   int fd = open(fname.c_str(), O_RDONLY);
+  //   if (fd < 0) {
+  //     s = PosixError(fname, errno);
+  //   } else if (mmap_limit_.Acquire()) {
+  //     uint64_t size;
+  //     s = GetFileSize(fname, &size);
+  //     if (s.ok()) {
+  //       void* base = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
+  //       if (base != MAP_FAILED) {
+  //         *result = new PosixMmapReadableFile(fname, base, size, &mmap_limit_);
+  //       } else {
+  //         s = PosixError(fname, errno);
+  //       }
+  //     }
+  //     close(fd);
+  //     if (!s.ok()) {
+  //       mmap_limit_.Release();
+  //     }
+  //   } else {
+  //     *result = new PosixRandomAccessFile(fname, fd, &fd_limit_);
+  //   }
+  //   return s;
+  // }
 
   virtual Status NewWritableFile(const std::string& fname,
                                  WritableFile** result) {
@@ -468,10 +823,11 @@ class PosixEnv : public Env {
     strftime(time_buf, 30, "%x %X", timeinfo);
     count_newfile++;
     std::string ldb_fmt = "ldb";
+    std::string log_fmt = "log";
     std::string name_fmt = fname.substr(fname.size() - 3);
     if (!(name_fmt == ldb_fmt)) { // if not ldb file, store it in the main directory
         fd = open(fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);
-        fprintf(log_fp, "[jc_log %s] new file [%s] number %d\n", time_buf, fname.c_str(),  count_newfile);
+        //fprintf(log_fp, "[jc_log %s] new file [%s] number %d\n", time_buf, fname.c_str(),  count_newfile);
         //Log(options_.info_log, "[jc_log] new file [%s] number %d\n", fname.c_str(), count_newfile); //zjc 20180511
     } else { //.ldb file, redirect by symbolic links !
         int split_level = fname.find("START");
@@ -489,12 +845,28 @@ class PosixEnv : public Env {
                 split_index--;
         }
         std::string disk_path;
-        if (level_num >= 2) { // the level_num is the original level?
-            //printf("HDD!!!\n");
-            disk_path = "/HDD";
+        if (level_num > 3) { // the level_num is the original level?
+            disk_path = "/SSD";
         } else {
-            disk_path = "/OPTANE";
+            //printf("Level in Persistent memory\n");
+            disk_path = "/PMEM";
+            const size_t defaultPmemFileSize = 20 * 1024 * 1024 ; 
+            // Create the full pmem path for the file
+            std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
+             // Use this full pmem path when creating PmemWritableFile
+            *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
+            //*result = new PmemWritableFile(fname_tmp, defaultPmemFileSize);  
+            //printf(" NOW write in Persistent memory OK at path: %s \n", pmem_path.c_str());
+
+            //  Create a symbolic link at the original location pointing to the PMEM file
+            if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
+                
+                perror("Failed to create symbolic link"); 
+                return Status::IOError("Failed to create symbolic link");
+            }
+            return Status::OK();
         }
+        
         //std::string actual_fname = fname_tmp.substr(0, split_index) + "/OPTANE" + fname_tmp.substr(split_index);
         std::string actual_fname = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
         int tmp_fd = open(actual_fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);

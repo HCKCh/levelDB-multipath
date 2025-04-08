@@ -11,7 +11,7 @@ set(CMAKE_C_STANDARD_REQUIRED OFF)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # This project requires C++11.
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -26,6 +26,13 @@ include(CheckIncludeFile)
 check_include_file("unistd.h" HAVE_UNISTD_H)
 
 include(CheckLibraryExists)
+
+# PMEM
+set(LIBPMEM_DIR "/usr/local/lib")
+link_directories(
+  ${LIBPMEM_DIR} 
+)
+
 check_library_exists(crc32c crc32c_value "" HAVE_CRC32C)
 check_library_exists(snappy snappy_compress "" HAVE_SNAPPY)
 check_library_exists(tcmalloc malloc "" HAVE_TCMALLOC)
@@ -228,6 +235,12 @@ endif(HAVE_SNAPPY)
 if(HAVE_TCMALLOC)
   target_link_libraries(leveldb tcmalloc)
 endif(HAVE_TCMALLOC)
+
+#PMEM
+# if(HAVE_LIBPMEM)
+message("try to link libpmem library")
+target_link_libraries(leveldb pmem)
+# endif(HAVE_LIBPMEM)
 
 # Needed by port_stdcxx.h
 find_package(Threads REQUIRED)

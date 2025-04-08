@@ -112,6 +112,12 @@ class Version {
   // Return a human readable string that describes this version's contents.
   std::string DebugString() const;
 
+  //CHIH
+
+  const std::vector<FileMetaData*>& GetFiles(int level) const {
+        return files_[level];
+    }
+
  private:
   friend class Compaction;
   friend class VersionSet;
@@ -267,15 +273,26 @@ class VersionSet {
   };
   const char* LevelSummary(LevelSummaryStorage* scratch) const;
 
- private:
-  class Builder;
+  //CHIH
+   static double GetKeyNumericValue(const Slice& key);
+   
+   static double CalculateL0OverlapRatio(const std::vector<FileMetaData*>& files, 
+                                         const InternalKeyComparator& icmp);
+                                         
+   static double calculateOverlap(const FileMetaData* f1, 
+                                  const FileMetaData* f2, 
+                                  const InternalKeyComparator& icmp);
 
-  friend class Compaction;
-  friend class Version;
+   void CollectL1KeyRanges(Compaction* c);
 
-  bool ReuseManifest(const std::string& dscname, const std::string& dscbase);
+    //CHIH 
+    void SetNeedL0L1Compaction(bool value);
 
-  void Finalize(Version* v);
+    bool NeedL0L1Compaction() const {
+    return need_l0_l1_compaction_;
+  }
+
+  bool last_compaction_was_l0l0_;
 
   void GetRange(const std::vector<FileMetaData*>& inputs,
                 InternalKey* smallest,
@@ -288,10 +305,37 @@ class VersionSet {
 
   void SetupOtherInputs(Compaction* c);
 
+
+ private:
+  class Builder;
+
+  friend class Compaction;
+  friend class Version;
+
+  bool ReuseManifest(const std::string& dscname, const std::string& dscbase);
+
+  void Finalize(Version* v);
+
+  // void GetRange(const std::vector<FileMetaData*>& inputs,
+  //               InternalKey* smallest,
+  //               InternalKey* largest);
+
+  // void GetRange2(const std::vector<FileMetaData*>& inputs1,
+  //                const std::vector<FileMetaData*>& inputs2,
+  //                InternalKey* smallest,
+  //                InternalKey* largest);
+
+  // void SetupOtherInputs(Compaction* c);
+
+
   // Save current contents to *log
   Status WriteSnapshot(log::Writer* log);
 
   void AppendVersion(Version* v);
+
+  //CHIH
+  bool need_l0_l1_compaction_; 
+  
 
   Env* const env_;
   const std::string dbname_;
@@ -317,6 +361,7 @@ class VersionSet {
   // No copying allowed
   VersionSet(const VersionSet&);
   void operator=(const VersionSet&);
+  
 };
 
 // A Compaction encapsulates information about a compaction.
@@ -361,19 +406,48 @@ class Compaction {
   // is successful.
   void ReleaseInputs();
 
+  //CHIH
+  bool is_l0_to_l0() const { return is_l0_to_l0_; }
+  void set_is_l0_to_l0(bool value) { is_l0_to_l0_ = value; }
+
+  // 访问L1的key ranges
+  const std::vector<std::pair<InternalKey, InternalKey>>& l1_key_ranges() const {
+    return l1_key_ranges_;
+  }
+
+  // 设置L1的key ranges
+  void set_l1_key_ranges(const std::vector<std::pair<InternalKey, InternalKey>>& ranges) {
+    l1_key_ranges_ = ranges;
+  }
+
+  //CHIH
+  Compaction(const Options* options, int level);
+  std::vector<FileMetaData*> inputs_[2]; 
+
+
+  
+
  private:
   friend class Version;
   friend class VersionSet;
 
-  Compaction(const Options* options, int level);
+  //CHIH
+  bool is_l0_to_l0_;
+
+  std::vector<std::pair<InternalKey, InternalKey>> l1_key_ranges_;
+
+   //CHIH
+
+  //Compaction(const Options* options, int level);
 
   int level_;
   uint64_t max_output_file_size_;
   Version* input_version_;
   VersionEdit edit_;
-
+  
+  // CHIH modify to public
   // Each compaction reads inputs from "level_" and "level_+1"
-  std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs
+  // std::vector<FileMetaData*> inputs_[2];      // The two sets of inputs
 
   // State used to check for number of of overlapping grandparent files
   // (parent == level_ + 1, grandparent == level_ + 2)
@@ -391,6 +465,7 @@ class Compaction {
   // all L >= level_ + 2).
   size_t level_ptrs_[config::kNumLevels];
 };
+
 
 }  // namespace leveldb
 

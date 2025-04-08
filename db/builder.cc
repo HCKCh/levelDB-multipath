@@ -47,7 +47,7 @@ Status BuildTable(const std::string& dbname,
   time ( &rawtime );
   timeinfo = localtime ( &rawtime );
   strftime(time_buf, 30, "%x %X", timeinfo);
-  fprintf(log_fp2, "[jc_log %s] Builder   Create: %s level-0?\n", time_buf,  fname.c_str());
+  //fprintf(log_fp2, "[jc_log %s] Builder   Create: %s level-0?\n", time_buf,  fname.c_str());
 #endif
   std::string ldb_fmt = "ldb";
   std::string name_fmt = fname.substr(fname.size() - 3);

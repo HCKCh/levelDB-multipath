@@ -42,7 +42,8 @@ static double MaxBytesForLevel(const Options* options, int level) {
   // the level-0 compaction threshold based on number of files.
 
   // Result for both level-0 and level-1
-  double result = 10. * 1048576.0;
+  //CHIH
+  double result = 100. * 1048576.0;
   while (level > 1) {
     result *= 10;
     level--;
@@ -790,6 +791,10 @@ VersionSet::VersionSet(const std::string& dbname,
       descriptor_file_(nullptr),
       descriptor_log_(nullptr),
       dummy_versions_(this),
+      //CHIH
+      need_l0_l1_compaction_(false),
+      last_compaction_was_l0l0_(false),
+      
       current_(nullptr) {
   AppendVersion(new Version(this));
 }
@@ -1142,17 +1147,32 @@ int VersionSet::NumLevelFiles(int level) const {
 
 const char* VersionSet::LevelSummary(LevelSummaryStorage* scratch) const {
   // Update code if kNumLevels changes
-  assert(config::kNumLevels == 7);
+  // CHIH
+  assert(config::kNumLevels == 6); // 7 
   snprintf(scratch->buffer, sizeof(scratch->buffer),
-           "files[ %d %d %d %d %d %d %d ]",
+          // "files[ %d %d %d %d %d %d %d ]",
+           "files[ %d %d %d %d %d %d ]",
            int(current_->files_[0].size()),
            int(current_->files_[1].size()),
            int(current_->files_[2].size()),
            int(current_->files_[3].size()),
            int(current_->files_[4].size()),
-           int(current_->files_[5].size()),
-           int(current_->files_[6].size()));
+           //int(current_->files_[5].size()),
+           //int(current_->files_[6].size()));
+           int(current_->files_[5].size()));
   return scratch->buffer;
+  
+
+  // assert(config::kNumLevels == 6);
+  // snprintf(scratch->buffer, sizeof(scratch->buffer),
+  //          "files[ %d %d %d %d %d %d %d ]",
+  //          int(current_->files_[0].size()),
+  //          int(current_->files_[1].size()),
+  //          int(current_->files_[2].size()),
+  //          int(current_->files_[3].size()),
+  //          int(current_->files_[4].size()),
+  //          int(current_->files_[5].size()));
+  // return scratch->buffer;
 }
 
 uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
@@ -1293,6 +1313,124 @@ Iterator* VersionSet::MakeInputIterator(Compaction* c) {
   return result;
 }
 
+//CHIH
+double VersionSet::GetKeyNumericValue(const Slice& key) {
+    // Implement conversion logic based on your key type.
+    // E.g., if key is a string of digits, convert it to integer or double.
+    // If key is binary encoded, decode it first.
+    // Ensure that returned type matches expected ranges and precision.
+    return static_cast<double>(std::stoll(key.ToString()));
+}
+
+//CHIH
+double VersionSet::calculateOverlap(const FileMetaData* f1, const FileMetaData* f2, const InternalKeyComparator& icmp) {
+    // Check if files overlap
+    if (icmp.Compare(f1->largest.user_key(), f2->smallest.user_key()) < 0 ||
+        icmp.Compare(f2->largest.user_key(), f1->smallest.user_key()) < 0) {
+        return 0.0;  // No overlap
+    }
+
+    // Calculate overlapping range
+    auto overlap_start = std::max(
+        VersionSet::GetKeyNumericValue(f1->smallest.user_key()), 
+        VersionSet::GetKeyNumericValue(f2->smallest.user_key())
+    );
+    auto overlap_end = std::min(
+        VersionSet::GetKeyNumericValue(f1->largest.user_key()), 
+        VersionSet::GetKeyNumericValue(f2->largest.user_key())
+    );
+        // Check if overlap is valid
+    if (overlap_start > overlap_end) {
+        // This means there is no valid overlap
+        return 0.0;
+    }
+    
+
+    // Calculate union range
+    auto union_start = std::min(
+        VersionSet::GetKeyNumericValue(f1->smallest.user_key()), 
+        VersionSet::GetKeyNumericValue(f2->smallest.user_key())
+    );
+    auto union_end = std::max(
+        VersionSet::GetKeyNumericValue(f1->largest.user_key()), 
+        VersionSet::GetKeyNumericValue(f2->largest.user_key())
+    );
+
+    // Calculate lengths
+    double overlap_length = overlap_end - overlap_start;
+    double union_length = union_end - union_start;
+
+    // Avoid division by zero
+    if (union_length <= 0) {
+        return 0.0;
+    }
+
+    // Calculate overlap ratio
+    double overlap_ratio = overlap_length / union_length;
+
+    // printf("File 1 Range: %.2f to %.2f\n", 
+    //        GetKeyNumericValue(f1->smallest.user_key()), 
+    //        GetKeyNumericValue(f1->largest.user_key()));
+    // printf("File 2 Range: %.2f to %.2f\n", 
+    //        GetKeyNumericValue(f2->smallest.user_key()), 
+    //        GetKeyNumericValue(f2->largest.user_key()));
+    //printf("Overlap Start: %.2f, End: %.2f\n", overlap_start, overlap_end);
+    //printf("Union Start: %.2f, End: %.2f\n", union_start, union_end);
+    //printf("Overlap Ratio: %.2f\n", overlap_ratio);
+
+    return overlap_ratio;
+}
+
+
+
+double VersionSet::CalculateL0OverlapRatio(const std::vector<FileMetaData*>& files, const InternalKeyComparator& icmp) {
+    double max_overlap_ratio = 0.0;
+
+    for (size_t i = 0; i < files.size(); ++i) {
+        for (size_t j = i + 1; j < files.size(); ++j) {
+            double overlapRatio = calculateOverlap(files[i], files[j], icmp);
+            //printf("Overlap ratio between file %zu and file %zu is: %.2f\n", i, j, overlapRatio); // print the ratio
+            max_overlap_ratio = std::max(max_overlap_ratio, overlapRatio);
+        }
+    }
+
+    return max_overlap_ratio;
+}
+
+//  CHIH average_overlap_ratio 
+
+// double VersionSet::CalculateL0OverlapRatio(const std::vector<FileMetaData*>& files, const InternalKeyComparator& icmp) {
+//     double total_overlap_ratio = 0.0;
+//     size_t comparisons = 0;
+
+//     for (size_t i = 0; i < files.size(); ++i) {
+//         for (size_t j = i + 1; j < files.size(); ++j) {
+//             double overlapRatio = calculateOverlap(files[i], files[j], icmp);
+//             //printf("Overlap ratio between file %zu and file %zu is: %.2f\n", i, j, overlapRatio); // print the ratio
+//             total_overlap_ratio += overlapRatio;
+//             comparisons++;
+//         }
+//     }
+
+//     // Avoid division by zero
+//     double average_overlap_ratio = 0.0;
+//     if (comparisons > 0) {
+//         average_overlap_ratio = total_overlap_ratio / comparisons;
+//     }
+//     //printf("Average overlap ratio for L0 files is: %.2f\n", average_overlap_ratio); // Print average ratio
+
+//     return average_overlap_ratio;
+
+// }
+
+
+
+// CHIH 
+void VersionSet::SetNeedL0L1Compaction(bool value) {
+    need_l0_l1_compaction_ = value;
+}
+
+
 Compaction* VersionSet::PickCompaction() {
   Compaction* c;
   int level;
@@ -1340,9 +1478,48 @@ Compaction* VersionSet::PickCompaction() {
     // which will include the picked file.
     current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
     assert(!c->inputs_[0].empty());
+    //CHIH
+    // Calculate L0 overlap ratio
+    double l0_overlap_ratio = CalculateL0OverlapRatio(c->inputs_[0], icmp_);
+
+    if (l0_overlap_ratio < 0.5 || last_compaction_was_l0l0_) {
+      c->set_is_l0_to_l0(false);
+      SetupOtherInputs(c);
+      last_compaction_was_l0l0_ = false;
+      //printf("last_compaction_was_l0l0_ = false\n");
+    } else {
+
+      c->set_is_l0_to_l0(true);
+      last_compaction_was_l0l0_ = true;
+      //printf("last_compaction_was_l0l0_ = true\n");
+
+      // if(c->is_l0_to_l0()) {  
+      // // 這裡只是用來確認 flag 
+      //   printf("is_l0_to_l0_ is true\n");
+      //   }
+      ////  
+      //CollectL1KeyRanges(c);
+    }
+
+      //not l0 set input    
+  } else {
+    SetupOtherInputs(c);
   }
 
-  SetupOtherInputs(c);
+   
+  
+//   if (level == 0) {
+//   InternalKey smallest, largest;
+//   GetRange(c->inputs_[0], &smallest, &largest);
+//   // Note that the next call will discard the file we placed in
+//   // c->inputs_[0] earlier and replace it with an overlapping set
+//   // which will include the picked file.
+//   current_->GetOverlappingInputs(0, &smallest, &largest, &c->inputs_[0]);
+//   assert(!c->inputs_[0].empty());
+// }
+
+//   SetupOtherInputs(c);
+
 
   return c;
 }
@@ -1408,6 +1585,58 @@ void VersionSet::SetupOtherInputs(Compaction* c) {
   c->edit_.SetCompactPointer(level, largest);
 }
 
+
+//CHIH
+
+void VersionSet::CollectL1KeyRanges(Compaction* c) {
+
+  //const int level = c->level() + 1;
+  const int level = 1;  // Directly set the level to 1
+  
+  //printf("CollectL1KeyRanges: Collecting key ranges from Level %d\n", level);
+  
+  // Temporary storage for the inputs at level 1
+  std::vector<FileMetaData*> l1_inputs;
+  
+  // The range covered by the compaction
+  InternalKey all_start, all_limit;
+  GetRange2(c->inputs_[0], c->inputs_[1], &all_start, &all_limit);
+  
+  // Log the range being considered for overlapping
+  //printf("Considering range: %s to %s\n", all_start.DebugString().c_str(), all_limit.DebugString().c_str());
+
+  //printf("Considering range: '%s' to '%s'\n", all_start.user_key().ToString().c_str(), all_limit.user_key().ToString().c_str());
+
+  // Find all overlapping sstables in level 1
+  current_->GetOverlappingInputs(level, &all_start, &all_limit, &l1_inputs);
+  
+  //printf("Found %lu overlapping sstables\n", l1_inputs.size());
+  
+  // Now, sort the sstables based on their smallest keys
+  std::sort(l1_inputs.begin(), l1_inputs.end(), [this](FileMetaData* a, FileMetaData* b) {
+    return icmp_.Compare(a->smallest, b->smallest) < 0;
+  });
+  
+  // Temporary vector to store the key ranges
+  std::vector<std::pair<InternalKey, InternalKey>> key_ranges;
+  
+  // Add the key ranges of these sstables to the temporary vector
+  for (const auto& f : l1_inputs) {
+
+      std::string start_key = f->smallest.user_key().ToString();
+      std::string end_key = f->largest.user_key().ToString();
+      //printf("Adding key range: %s to %s\n", start_key.c_str(), end_key.c_str());
+
+      key_ranges.push_back(std::make_pair(f->smallest, f->largest));
+    
+  }
+  
+  // Set the compaction object's l1_key_ranges_ member variable
+  c->set_l1_key_ranges(key_ranges);
+ // printf("L1 key ranges set with size: %lu\n", key_ranges.size());
+}
+
+
 Compaction* VersionSet::CompactRange(
     int level,
     const InternalKey* begin,
@@ -1449,7 +1678,10 @@ Compaction::Compaction(const Options* options, int level)
       input_version_(nullptr),
       grandparent_index_(0),
       seen_key_(false),
-      overlapped_bytes_(0) {
+      overlapped_bytes_(0),
+      //CHIH
+      is_l0_to_l0_(false) 
+       {
   for (int i = 0; i < config::kNumLevels; i++) {
     level_ptrs_[i] = 0;
   }

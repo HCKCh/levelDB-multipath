@@ -16,14 +16,14 @@ Options::Options()
       paranoid_checks(false),
       env(Env::Default()),
       info_log(nullptr),
-      write_buffer_size(4<<20),
-      max_open_files(1000),
+      write_buffer_size(4<<20),//4
+      max_open_files(2000),//1000
       block_cache(nullptr),
       block_size(4096),
       block_restart_interval(16),
-      max_file_size(2<<20),
+      max_file_size(4<<20),
       compression(kSnappyCompression),
-      reuse_logs(false),
+      reuse_logs(true),
       filter_policy(nullptr) {
 }
 

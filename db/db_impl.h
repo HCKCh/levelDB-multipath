@@ -14,6 +14,8 @@
 #include "leveldb/env.h"
 #include "port/port.h"
 #include "port/thread_annotations.h"
+#include "version_edit.h"
+
 
 namespace leveldb {
 
@@ -63,6 +65,9 @@ class DBImpl : public DB {
   // Samples are taken approximately once every config::kReadBytesPeriod
   // bytes.
   void RecordReadSample(Slice key);
+  //CHIH
+  std::vector<FileMetaData*> l0l0_outputs_;
+ 
 
  private:
   friend class DB;
@@ -111,12 +116,29 @@ class DBImpl : public DB {
   void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
-  Status DoCompactionWork(CompactionState* compact)
+      // CHIH 
+      // add const InternalKeyComparator& icmp
+  Status DoCompactionWork(CompactionState* compact,const InternalKeyComparator& icmp);
+  
+  //Status DoCompactionWork(CompactionState* compact, bool is_l0_to_l0);
+
+  //CHIH
+  bool IsOverlapping(FileMetaData* l0_file, FileMetaData* l1_file);
+  
+  Status DoCompactionWork(CompactionState* compact);
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   Status OpenCompactionOutputFile(CompactionState* compact);
   Status FinishCompactionOutputFile(CompactionState* compact, Iterator* input);
-  Status InstallCompactionResults(CompactionState* compact)
+  //Status InstallCompactionResults(CompactionState* compact);
+
+  // CHIH
+  Status InstallCompactionResults(CompactionState *compact, bool is_l0_to_l0);
+
+  bool ShouldStartNewOutputFile(CompactionState* compact, const Slice& key,const InternalKeyComparator& icmp);
+  //bool ShouldStartNewOutputFile(CompactionState* compact, const Slice& key);
+  
+
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   // Constant after construction

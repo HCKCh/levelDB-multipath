@@ -32,7 +32,9 @@ set(LIBPMEM_DIR "/usr/local/lib")
 link_directories(
   ${LIBPMEM_DIR} 
 )
-
+link_directories("/home/kcchiang/snappy/build")
+include_directories("/home/kcchiang/snappy" "/home/kcchiang/snappy/build")
+set(HAVE_SNAPPY ON)
 check_library_exists(crc32c crc32c_value "" HAVE_CRC32C)
 check_library_exists(snappy snappy_compress "" HAVE_SNAPPY)
 check_library_exists(tcmalloc malloc "" HAVE_TCMALLOC)

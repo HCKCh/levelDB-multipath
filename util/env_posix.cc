@@ -649,7 +649,7 @@ bool IsFileInPmemDir(const std::string& filepath, const std::string& pmemDirPath
     return false;
 }
 bool IsPmemFile(const std::string& fname) {
-    const std::string pmemDir = "/home/usertwo/test/dbtest/";
+    const std::string pmemDir = "/home/kcchiang/test/dbtest/";
     
     if (fname.find(".ldb") != std::string::npos) { 
        // std::cout << "Checking if file: " << fname << " is in PMEM directory..." << std::endl;
@@ -873,7 +873,7 @@ virtual Status NewRandomAccessFile(const std::string& fname,
         close(tmp_fd);
         symlinkat(actual_fname.c_str(), AT_FDCWD, fname_tmp.c_str());
         fd = open(fname_tmp.c_str(), O_WRONLY, 0644);
-        fprintf(log_fp, "[jc_log %s] new file (fname=%s)[%s]-->[%s] (level-%d) number %d\n", time_buf, fname.c_str(), fname_tmp.c_str(), actual_fname.c_str(), level_num, count_newfile);
+        // KCC //fprintf(log_fp, "[jc_log %s] new file (fname=%s)[%s]-->[%s] (level-%d) number %d\n", time_buf, fname.c_str(), fname_tmp.c_str(), actual_fname.c_str(), level_num, count_newfile);
         //Log(options_.info_log, "[jc_log] new file (fname=%s)[%s]-->[%s] (level-%d) number %d\n", time_buf, fname.c_str(), fname_tmp.c_str(), actual_fname.c_str(), level_num, count_newfile); // zjc 20180511
     }
     //zjc
@@ -930,14 +930,14 @@ virtual Status NewRandomAccessFile(const std::string& fname,
     std::string ldb_fmt = "ldb";
     std::string name_fmt = fname.substr(fname.size() - 3);
     if (!(name_fmt == ldb_fmt)) { // if not ldb file, just delete it from the main directory
-        fprintf(log_fp, "[jc_log %s] remove [%s] file number %d\n", time_buf, fname.c_str(),  count_rm_file);
+        // fprintf(log_fp, "[jc_log %s] remove [%s] file number %d\n", time_buf, fname.c_str(),  count_rm_file);
         if (unlink(fname.c_str()) != 0) {
           result = PosixError(fname, errno);
         }
     } else { //.ldb file, redirect by symbolic links !
         char real_name[256];
         realpath(fname.c_str(), real_name);
-        fprintf(log_fp, "[jc_log %s] remove [%s] --> [%s] file number %d\n", time_buf, fname.c_str(), real_name, count_rm_file);
+        // fprintf(log_fp, "[jc_log %s] remove [%s] --> [%s] file number %d\n", time_buf, fname.c_str(), real_name, count_rm_file);
         if (unlink(real_name) != 0) {
           result = PosixError(fname, errno);
         }
@@ -966,7 +966,8 @@ virtual Status NewRandomAccessFile(const std::string& fname,
     time ( &rawtime );
     timeinfo = localtime ( &rawtime );
     strftime(time_buf, 30, "%x %X", timeinfo);
-    fprintf(log_fp, "[jc_log %s] remove DIR!!!!!! (%s)\n", time_buf, name.c_str());
+    // KCC try to resolve core dump
+    // fprintf(log_fp, "ERRORn"); //"[jc_log %s] remove DIR!!!!!! (%s)\n", time_buf, name.c_str());
 
     Status result;
     if (rmdir(name.c_str()) != 0) {
@@ -992,7 +993,7 @@ virtual Status NewRandomAccessFile(const std::string& fname,
     time ( &rawtime );
     timeinfo = localtime ( &rawtime );
     strftime(time_buf, 30, "%x %X", timeinfo);
-    fprintf(log_fp, "[jc_log %s] RENAME FILE!!!!!! %s -> %s\n", time_buf, src.c_str(), target.c_str());
+    // fprintf(log_fp, "[jc_log %s] RENAME FILE!!!!!! %s -> %s\n", time_buf, src.c_str(), target.c_str());
     Status result;
     if (rename(src.c_str(), target.c_str()) != 0) {
       result = PosixError(src, errno);

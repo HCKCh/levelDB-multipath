@@ -19,6 +19,7 @@ namespace leveldb {
 
 //zjc 20180507
 #ifdef JC_DEBUG
+static FILE *log_fp = fopen("/tmp/jc_create.log", "a+"); // KCC try to resolve core dump
 static FILE *log_fp2 = fopen("/tmp/jc_create2.log", "a+");
 static char time_buf[30];
 static time_t rawtime;

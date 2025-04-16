@@ -1680,12 +1680,17 @@ Compaction::Compaction(const Options* options, int level)
       seen_key_(false),
       overlapped_bytes_(0),
       //CHIH
-      is_l0_to_l0_(false) 
-       {
-  for (int i = 0; i < config::kNumLevels; i++) {
-    level_ptrs_[i] = 0;
-  }
-}
+      is_l0_to_l0_(false) {
+        for (int i = 0; i < config::kNumLevels; i++) {
+          level_ptrs_[i] = 0;
+        }
+        printf("Compaction created with options:\n");
+        printf("  max_open_files: %d\n", options->max_open_files);
+        printf("  write_buffer_size: %zu\n", options->write_buffer_size);
+        printf("  max_file_size: %zu\n", options->max_file_size);
+        printf("  block_size: %zu\n", options->block_size);
+        printf("  level: %d\n", level_);
+      }
 
 Compaction::~Compaction() {
   if (input_version_ != nullptr) {
@@ -1732,10 +1737,13 @@ bool Compaction::IsBaseLevelForKey(const Slice& user_key) {
   return true;
 }
 
-bool Compaction::ShouldStopBefore(const Slice& internal_key) {
+bool Compaction::ShouldStopBefore(const Slice& internal_key) {  
+  // fprintf(stderr, "input_version_: %p, vset_: %p\n", input_version_, input_version_ ? input_version_->vset_ : nullptr);
   const VersionSet* vset = input_version_->vset_;
+  
+  // printf("For debugging one\n");
   // Scan to find earliest grandparent file that contains key.
-  const InternalKeyComparator* icmp = &vset->icmp_;
+  const InternalKeyComparator* icmp = &vset->icmp_;  
   while (grandparent_index_ < grandparents_.size() &&
       icmp->Compare(internal_key,
                     grandparents_[grandparent_index_]->largest.Encode()) > 0) {

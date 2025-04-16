@@ -97,6 +97,12 @@ struct DBImpl::CompactionState {
         //CHIH
         is_l0_to_l0(c->is_l0_to_l0()),
         total_bytes(0) {
+          printf("CompactionState initialized:\n");
+          printf("  compaction: %p\n", compaction);
+          printf("  outfile: %p\n", outfile);
+          printf("  builder: %p\n", builder);
+          printf("  is_l0_to_l0: %d\n", is_l0_to_l0);
+          printf("  total_bytes: %llu\n", static_cast<unsigned long long>(total_bytes));
   }
 };
 
@@ -740,6 +746,7 @@ void DBImpl::BackgroundCompaction() {
   bool is_l0l1_compaction_needed = versions_->NeedL0L1Compaction();
 
   InternalKey manual_end;
+  
   if (is_manual) {
     ManualCompaction* m = manual_compaction_;
     c = versions_->CompactRange(m->level, m->begin, m->end);
@@ -754,74 +761,71 @@ void DBImpl::BackgroundCompaction() {
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
   }
-  /**
-  else if (is_l0l1_compaction_needed) {
-  
+  else if (is_l0l1_compaction_needed) { ////test one    
     std::unordered_set<uint64_t> processed_l0;
     
     for (const auto& l1_file : versions_->current()->GetFiles(1)) {
+      // printf("*** %s ***\n", versions_->current()->GetFiles(1));
       std::vector<FileMetaData*> l0_compact_group;
       for (auto* l0_file : l0l0_outputs_) {
-       
         if (processed_l0.find(l0_file->number) != processed_l0.end()) {
           continue;
         }
         if (IsOverlapping(l0_file, l1_file)) {
           l0_compact_group.push_back(l0_file);
-       
           processed_l0.insert(l0_file->number);
         }
       }
-
       if (!l0_compact_group.empty()) {
         InternalKey smallest, largest;
         versions_->GetRange(l0_compact_group, &smallest, &largest);
         std::vector<FileMetaData*> l1_inputs;
         versions_->current()->GetOverlappingInputs(1, &smallest, &largest, &l1_inputs);
-
         if (!l1_inputs.empty()) {
-           //printf("Performing L0-L1 Compaction for overlapping range\n");
+          printf("Performing L0-L1 Compaction for overlapping range\n");
           Compaction* c = new Compaction(&options_, 0);
           c->set_is_l0_to_l0(false); 
-
+          // fprintf(stderr, "input_version_: %p, vset_: %p\n", c->inputs_->, input_version_ ? input_version_->vset_ : nullptr);
           for (auto* f : l0_compact_group) {
             c->inputs_[0].push_back(f);
           }
           c->inputs_[1] = l1_inputs; 
           // for (const auto& f : c->inputs_[0]) {
-          //   printf("  File #%llu, size=%llu, range=[%s, %s]\n",
-          //          static_cast<unsigned long long>(f->number),
-          //          static_cast<unsigned long long>(f->file_size),
-          //          f->smallest.DebugString().c_str(),
-          //          f->largest.DebugString().c_str());
+            // printf("c->inputs_[0]  File #%llu, size=%llu, range=[%s, %s]\n",
+                  //  static_cast<unsigned long long>(f->number),
+                  //  static_cast<unsigned long long>(f->file_size),
+                  //  f->smallest.DebugString().c_str(),
+                  //  f->largest.DebugString().c_str());
           // }
-
           // for (const auto& f : c->inputs_[1]) {
-          //   printf("  File #%llu, size=%llu, range=[%s, %s]\n",
-          //          static_cast<unsigned long long>(f->number),
-          //          static_cast<unsigned long long>(f->file_size),
-          //          f->smallest.DebugString().c_str(),
-          //          f->largest.DebugString().c_str());
+            // printf("c->inputs_[1]  File #%llu, size=%llu, range=[%s, %s]\n",
+                  //  static_cast<unsigned long long>(f->number),
+                  //  static_cast<unsigned long long>(f->file_size),
+                  //  f->smallest.DebugString().c_str(),
+                  //  f->largest.DebugString().c_str());
           // }
-         
+          
           CompactionState* compact = new CompactionState(c);
-          Status status = DoCompactionWork(compact);
+          
+          Status status = DoCompactionWork(compact); // KCC found here will induce segmentation fault
+          
           if (!status.ok()) {
             RecordBackgroundError(status);
           }
+          
           CleanupCompaction(compact);
           c->ReleaseInputs();
           delete c;
         } else {
-          //printf("No overlapping L1 inputs found for the L0 compaction group.\n");
+          printf("No overlapping L1 inputs found for the L0 compaction group.\n");
         }
       }
     }
     l0l0_outputs_.clear();
     versions_->SetNeedL0L1Compaction(false);
 }
-*/
-  
+
+  // test 2 
   /*
   else if (is_l0l1_compaction_needed) {
 
@@ -887,6 +891,7 @@ void DBImpl::BackgroundCompaction() {
     versions_->SetNeedL0L1Compaction(false);
   }
   */
+  //test 3
   /*
   else if (is_l0l1_compaction_needed) {
     
@@ -904,7 +909,8 @@ void DBImpl::BackgroundCompaction() {
 
     versions_->SetNeedL0L1Compaction(false);
     
-  } */
+  } 
+  */
   else {
     c = versions_->PickCompaction();
   }
@@ -935,11 +941,12 @@ void DBImpl::BackgroundCompaction() {
     CompactionState* compact = new CompactionState(c);
     //CHIH
     compact->is_l0_to_l0 = c->is_l0_to_l0(); 
-    if (compact->is_l0_to_l0) {
-      //printf("CompactionState indicates L0-L0 compaction.\n");
-    } else {
-      //printf("CompactionState indicates not L0-L0 compaction (potentially L0-L1).\n");
-    }
+
+    // if (compact->is_l0_to_l0) {
+    //   //printf("CompactionState indicates L0-L0 compaction.\n");
+    // } else {
+    //   //printf("CompactionState indicates not L0-L0 compaction (potentially L0-L1).\n");
+    // }
 
     //status = DoCompactionWork(compact);
     //status = DoCompactionWork(compact,compact->is_l0_to_l0);
@@ -1177,13 +1184,16 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact, bool is_l0_to_
 Status DBImpl::DoCompactionWork(CompactionState* compact) {
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
-
   Log(options_.info_log,  "Compacting %d@%d + %d@%d files",
       compact->compaction->num_input_files(0),
       compact->compaction->level(),
       compact->compaction->num_input_files(1),
       compact->compaction->level() + 1);
-
+  printf("Compacting %d@%d + %d@%d files\n",
+    compact->compaction->num_input_files(0),
+    compact->compaction->level(),
+    compact->compaction->num_input_files(1),
+    compact->compaction->level() + 1);
   assert(versions_->NumLevelFiles(compact->compaction->level()) > 0);
   assert(compact->builder == nullptr);
   assert(compact->outfile == nullptr);
@@ -1192,7 +1202,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   } else {
     compact->smallest_snapshot = snapshots_.oldest()->sequence_number();
   }
-
+  
   // Release mutex while we're actually doing the compaction work
   mutex_.Unlock();
 
@@ -1204,6 +1214,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   bool has_current_user_key = false;
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
   for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
+    printf("%s(CompactionState* compact)\n", __func__);
     // Prioritize immutable compaction work
     if (has_imm_.NoBarrier_Load() != nullptr) {
       const uint64_t imm_start = env_->NowMicros();
@@ -1217,16 +1228,18 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       imm_micros += (env_->NowMicros() - imm_start);
     }
 
-    Slice key = input->key();
     printf("Processing key: %s\n", input->key().ToString().c_str());
+    printf("For debugging Start\n");
+    Slice key = input->key();
     if (compact->compaction->ShouldStopBefore(key) &&
     compact->builder != nullptr) {
+      
       status = FinishCompactionOutputFile(compact, input);
       if (!status.ok()) {
         break;
       }
     }
-
+    printf("For debugging end\n");
     // Handle key/value, add to state, etc.
     bool drop = false;
     if (!ParseInternalKey(key, &ikey)) {
@@ -1350,6 +1363,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 }
 //CHIH
 Status DBImpl::DoCompactionWork(CompactionState* compact,const InternalKeyComparator& icmp) {
+  
   const uint64_t start_micros = env_->NowMicros();
   int64_t imm_micros = 0;  // Micros spent doing imm_ compactions
 
@@ -1380,6 +1394,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact,const InternalKeyCompar
   SequenceNumber last_sequence_for_key = kMaxSequenceNumber;
   for (; input->Valid() && !shutting_down_.Acquire_Load(); ) {
     // Prioritize immutable compaction work
+    //printf("%s(CompactionState* compact,const InternalKeyComparator& icmp)\n", __func__);
     if (has_imm_.NoBarrier_Load() != nullptr) {
       const uint64_t imm_start = env_->NowMicros();
       mutex_.Lock();

@@ -113,6 +113,8 @@ class DBImpl : public DB {
   void MaybeScheduleCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   static void BGWork(void* db);
   void BackgroundCall();
+  //KCC marked
+  void perform_l0l1_compaction(); EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void BackgroundCompaction() EXCLUSIVE_LOCKS_REQUIRED(mutex_);
   void CleanupCompaction(CompactionState* compact)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);

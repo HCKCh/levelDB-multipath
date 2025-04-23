@@ -17,6 +17,7 @@
 #include "table/two_level_iterator.h"
 #include "util/coding.h"
 #include "util/logging.h"
+#include <unordered_set>
 
 namespace leveldb {
 
@@ -1683,13 +1684,14 @@ Compaction::Compaction(const Options* options, int level)
       is_l0_to_l0_(false) {
         for (int i = 0; i < config::kNumLevels; i++) {
           level_ptrs_[i] = 0;
+
         }
-        printf("Compaction created with options:\n");
-        printf("  max_open_files: %d\n", options->max_open_files);
-        printf("  write_buffer_size: %zu\n", options->write_buffer_size);
-        printf("  max_file_size: %zu\n", options->max_file_size);
-        printf("  block_size: %zu\n", options->block_size);
-        printf("  level: %d\n", level_);
+        // printf("Compaction created with options:\n");
+        // printf("  max_open_files: %d\n", options->max_open_files);
+        // printf("  write_buffer_size: %zu\n", options->write_buffer_size);
+        // printf("  max_file_size: %zu\n", options->max_file_size);
+        // printf("  block_size: %zu\n", options->block_size);
+        // printf("  level: %d\n", level_);
       }
 
 Compaction::~Compaction() {

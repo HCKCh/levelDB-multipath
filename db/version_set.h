@@ -286,9 +286,9 @@ class VersionSet {
    void CollectL1KeyRanges(Compaction* c);
 
     //CHIH 
-    void SetNeedL0L1Compaction(bool value);
+  void SetNeedL0L1Compaction(bool value);
 
-    bool NeedL0L1Compaction() const {
+  bool NeedL0L1Compaction() const {
     return need_l0_l1_compaction_;
   }
 
@@ -405,7 +405,9 @@ class Compaction {
   // Release the input version for the compaction, once the compaction
   // is successful.
   void ReleaseInputs();
-
+  // KCC try to move function from DBImpl to here
+  // bool IsOverlapping(FileMetaData* l0_file, FileMetaData* l1_file);
+  // void l0l1_addversion(VersionSet* const , std::vector<FileMetaData*> l0l0_outputs_);
   //CHIH
   bool is_l0_to_l0() const { return is_l0_to_l0_; }
   void set_is_l0_to_l0(bool value) { is_l0_to_l0_ = value; }
@@ -423,14 +425,17 @@ class Compaction {
   //CHIH
   Compaction(const Options* options, int level);
   std::vector<FileMetaData*> inputs_[2]; 
-
+  // KCC add for early L0L1 compation
+  void set_input_version(Version* version) { 
+    input_version_ = version; 
+  }
 
   
 
  private:
   friend class Version;
   friend class VersionSet;
-
+  friend class DBImpl;
   //CHIH
   bool is_l0_to_l0_;
 
@@ -464,6 +469,7 @@ class Compaction {
   // higher level than the ones involved in this compaction (i.e. for
   // all L >= level_ + 2).
   size_t level_ptrs_[config::kNumLevels];
+  
 };
 
 

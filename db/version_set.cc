@@ -1684,7 +1684,6 @@ Compaction::Compaction(const Options* options, int level)
       is_l0_to_l0_(false) {
         for (int i = 0; i < config::kNumLevels; i++) {
           level_ptrs_[i] = 0;
-
         }
         // printf("Compaction created with options:\n");
         // printf("  max_open_files: %d\n", options->max_open_files);

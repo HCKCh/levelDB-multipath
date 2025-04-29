@@ -716,12 +716,16 @@ void DBImpl::BackgroundCall() {
 }
 
 bool DBImpl::IsOverlapping(FileMetaData* l0_file, FileMetaData* l1_file) {
+  if (l0_file == nullptr || l1_file == nullptr) {
+    printf("Error: l0_file or l1_file is nullptr\n");
+    return false;
+  }
   if (l0_file->largest.user_key().compare(l1_file->smallest.user_key()) < 0) {
-      printf("l0_file largest key is less than l1_file smallest key\n");
+      //printf("l0_file largest key is less than l1_file smallest key\n");
       return false;
   }
   if (l0_file->smallest.user_key().compare(l1_file->largest.user_key()) > 0) {
-      printf("l0_file smallest key is greater than l1_file largest key\n");
+      //printf("l0_file smallest key is greater than l1_file largest key\n");
       return false;
   }
   return true;
@@ -736,37 +740,55 @@ void DBImpl::perform_l0l1_compaction() {
   //   printf("L0-L1 compaction is not needed\n");
   // }
   std::unordered_set<uint64_t> processed_l0;
-    
-  for (const auto& l1_file : versions_->current()->GetFiles(1)) {
-    // printf("get l1 file \n");
+  if (versions_->current() == nullptr) {
+    printf("Error: versions_->current() is nullptr\n");
+    return;
+  }
+  if (l0l0_outputs_.empty()) {
+    printf("Error: l0l0_outputs_ is empty\n");
+    return;
+  }
+  std::vector<FileMetaData*> l1_files = versions_->current()->GetFiles(1);
+  //for (const auto& l1_file : versions_->current()->GetFiles(1)) {
+  while(!l1_files.empty()){
+    FileMetaData* l1_file = l1_files.front();
+    l1_files.erase(l1_files.begin()); 
     // printf("l1 file number: %llu\n", static_cast<unsigned long long>(l1_file->number));      
     // Check if the L1 file overlaps with any L0 files
     // If it does, we will perform L0-L1 compaction
     std::vector<FileMetaData*> l0_compact_group;
     for (auto* l0_file : l0l0_outputs_) {
-      // printf("get l0 file \n");
-      // printf("*** %s smallest\n", l0_file->smallest.user_key().ToString().c_str());
-      // printf("*** %s largest\n", l0_file->largest.user_key().ToString().c_str());
-      // printf("l0 file number: %llu\n", static_cast<unsigned long long>(l0_file->number));
-      
+      if (l0_file == nullptr) {
+        printf("Error: l0_file is nullptr\n");
+        continue;
+      }
+    
       if (processed_l0.find(l0_file->number) != processed_l0.end()) {
-        // This function check the overlap between l0 and l1 file
-        // If the l0 file has been processed, skip it
-        // printf("processed_l0 find l0 file number: %llu processed_l0.end() = %llu\n", static_cast<unsigned long long>(l0_file->number), processed_l0.end());
+        // printf("L0 file #%llu has already been processed. Skipping.\n",
+        //        static_cast<unsigned long long>(l0_file->number));
         continue;
       }
       if (IsOverlapping(l0_file, l1_file)) {
-        // printf("IsOverlapping(l0=%llu, l1=%llu)\n", static_cast<unsigned long long>(l0_file->number), static_cast<unsigned long long>(l1_file->number));
+        // printf("L0 file #%llu overlaps with L1 file #%llu\n",
+        //        static_cast<unsigned long long>(l0_file->number),
+        //        static_cast<unsigned long long>(l1_file->number));
         l0_compact_group.push_back(l0_file);
         processed_l0.insert(l0_file->number);
-        // printf("IsOverlapping(l0=%llu, l1=%llu)\n", static_cast<unsigned long long>(l0_file->number), static_cast<unsigned long long>(l1_file->number));
-      }
+      } 
+      // else {
+      //   printf("L0 file #%llu does not overlap with L1 file #%llu\n",
+      //          static_cast<unsigned long long>(l0_file->number),
+      //          static_cast<unsigned long long>(l1_file->number));
+      // }
     }
     if (!l0_compact_group.empty()) {
       InternalKey smallest, largest;
       versions_->GetRange(l0_compact_group, &smallest, &largest);
       std::vector<FileMetaData*> l1_inputs;
       versions_->current()->GetOverlappingInputs(1, &smallest, &largest, &l1_inputs);
+      // printf("smallest: %s, largest: %s\n",
+      //        smallest.user_key().ToString().c_str(),
+      //        largest.user_key().ToString().c_str());
       if (!l1_inputs.empty()) {
         // printf("Performing L0-L1 Compaction for overlapping range\n");
         Compaction* c = new Compaction(&options_, 0); //KCC: this function error induced Compation error --> no version related information
@@ -778,33 +800,37 @@ void DBImpl::perform_l0l1_compaction() {
         }
         c->inputs_[1] = l1_inputs; 
         // for (const auto& f : c->inputs_[0]) {
-          // printf("c->inputs_[0]  File #%llu, size=%llu, range=[%s, %s]\n",
-                  // static_cast<unsigned long long>(f->number),
-                  // static_cast<unsigned long long>(f->file_size),
-                  // f->smallest.DebugString().c_str(),
-                  // f->largest.DebugString().c_str());
+        //   printf("c->inputs_[0]  File #%llu, size=%llu, range=[%s, %s]\n",
+        //           static_cast<unsigned long long>(f->number),
+        //           static_cast<unsigned long long>(f->file_size),
+        //           f->smallest.DebugString().c_str(),
+        //           f->largest.DebugString().c_str());
         // }
         // for (const auto& f : c->inputs_[1]) {
-          // printf("c->inputs_[1]  File #%llu, size=%llu, range=[%s, %s]\n",
-                  // static_cast<unsigned long long>(f->number),
-                  // static_cast<unsigned long long>(f->file_size),
-                  // f->smallest.DebugString().c_str(),
-                  // f->largest.DebugString().c_str());
+        //   printf("c->inputs_[1]  File #%llu, size=%llu, range=[%s, %s]\n",
+        //           static_cast<unsigned long long>(f->number),
+        //           static_cast<unsigned long long>(f->file_size),
+        //           f->smallest.DebugString().c_str(),
+        //           f->largest.DebugString().c_str());
         // }
+        if (versions_->current() == nullptr) {
+          return;
+        }
+        //KCC try to fill up the version information 
         c->set_input_version(versions_->current());
         c->input_version_->Ref();
-        // c->inputs_[0] = inputs;
         CompactionState* compact = new CompactionState(c);
         
         Status status = DoCompactionWork(compact); // KCC found here will induce segmentation fault
-        
         if (!status.ok()) {
           RecordBackgroundError(status);
         }
         
         CleanupCompaction(compact);
         c->ReleaseInputs();
+        DeleteObsoleteFiles();
         delete c;
+        l1_files = versions_->current()->GetFiles(1);
       } else {
         printf("No overlapping L1 inputs found for the L0 compaction group.\n");
       }
@@ -813,6 +839,7 @@ void DBImpl::perform_l0l1_compaction() {
   l0l0_outputs_.clear();
   versions_->SetNeedL0L1Compaction(false);
 }
+
 void DBImpl::BackgroundCompaction() {
   mutex_.AssertHeld();
   //printf("DBImpl::BackgroundCompaction()\n");
@@ -847,14 +874,13 @@ void DBImpl::BackgroundCompaction() {
     c = versions_->PickCompaction();
   }
   
-
   Status status;
   if (c == nullptr) {
     // Nothing to do
     //printf("Nothing to do\n");
   } else if (!is_manual && c->IsTrivialMove()) {
     // Move file to next level
-    printf("is_manual && c->IsTrivialMove()\n");
+    // printf("is_manual && c->IsTrivialMove()\n");
     assert(c->num_input_files(0) == 1);
     FileMetaData* f = c->input(0, 0);
     c->edit()->DeleteFile(c->level(), f->number);
@@ -891,7 +917,6 @@ void DBImpl::BackgroundCompaction() {
     //status = DoCompactionWork(compact);
     //status = DoCompactionWork(compact,compact->is_l0_to_l0);
     status = DoCompactionWork(compact, this->internal_comparator_);
-
     if (!status.ok()) {
       RecordBackgroundError(status);
     }
@@ -926,6 +951,7 @@ void DBImpl::BackgroundCompaction() {
 }
 
 void DBImpl::CleanupCompaction(CompactionState* compact) {
+  
   mutex_.AssertHeld();
   if (compact->builder != nullptr) {
     // May happen if we get a shutdown call in the middle of compaction
@@ -937,7 +963,7 @@ void DBImpl::CleanupCompaction(CompactionState* compact) {
   delete compact->outfile;
   for (size_t i = 0; i < compact->outputs.size(); i++) {
     const CompactionState::Output& out = compact->outputs[i];
-    pending_outputs_.erase(out.number);
+    pending_outputs_.erase(out.number);    
   }
   delete compact;
 }
@@ -1167,7 +1193,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       mutex_.Unlock();
       imm_micros += (env_->NowMicros() - imm_start);
     }
-
+    
     // printf("Processing key: %s\n", input->key().ToString().c_str());
     // printf("For debugging Start\n");
     Slice key = input->key();
@@ -1214,6 +1240,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
       last_sequence_for_key = ikey.sequence;
     }
+    
 #if 0
     Log(options_.info_log,
         "  Compact: %s, seq %d, type: %d %d, drop: %d, is_base: %d, "
@@ -1250,7 +1277,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
 
     input->Next();
   }
-
+  
   if (status.ok() && shutting_down_.Acquire_Load()) {
     status = Status::IOError("Deleting DB during compaction");
   }
@@ -1262,7 +1289,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   }
   delete input;
   input = nullptr;
-
+  
   CompactionStats stats;
   stats.micros = env_->NowMicros() - start_micros - imm_micros;
   for (int which = 0; which < 2; which++) {
@@ -1273,7 +1300,7 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
   for (size_t i = 0; i < compact->outputs.size(); i++) {
     stats.bytes_written += compact->outputs[i].file_size;
   }
-
+  
   mutex_.Lock();
   // stats_[compact->compaction->level() + 1].Add(stats);
   //CHIH 
@@ -1284,20 +1311,20 @@ Status DBImpl::DoCompactionWork(CompactionState* compact) {
       stats_[level + 1].Add(stats);
   }
 
-
+  
   if (status.ok()) {
   //CHIH
   //status = InstallCompactionResults(compact);
   Status s = InstallCompactionResults(compact, compact->compaction->is_l0_to_l0());
-
-
   }
+  
   if (!status.ok()) {
     RecordBackgroundError(status);
   }
   VersionSet::LevelSummaryStorage tmp;
+  
   Log(options_.info_log,
-      "compacted to: %s", versions_->LevelSummary(&tmp));
+     "compacted to: %s", versions_->LevelSummary(&tmp));
   return status;
 }
 //CHIH

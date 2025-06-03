@@ -750,7 +750,7 @@ void DBImpl::perform_l0l1_compaction() {
   }
   std::vector<FileMetaData*> l1_files = versions_->current()->GetFiles(1);
   //for (const auto& l1_file : versions_->current()->GetFiles(1)) {
-  while(!l1_files.empty()){
+  while(!l1_files.empty() && is_l0l1_compaction_needed){
     FileMetaData* l1_file = l1_files.front();
     l1_files.erase(l1_files.begin()); 
     // printf("l1 file number: %llu\n", static_cast<unsigned long long>(l1_file->number));      
@@ -816,6 +816,7 @@ void DBImpl::perform_l0l1_compaction() {
         if (versions_->current() == nullptr) {
           return;
         }
+        printf("versions_->current() is %s\n", versions_->current()->DebugString().c_str());
         //KCC try to fill up the version information 
         c->set_input_version(versions_->current());
         c->input_version_->Ref();
@@ -835,6 +836,8 @@ void DBImpl::perform_l0l1_compaction() {
         printf("No overlapping L1 inputs found for the L0 compaction group.\n");
       }
     }
+    versions_->SetNeedL0L1Compaction(false);
+    is_l0l1_compaction_needed = versions_->NeedL0L1Compaction();
   }
   l0l0_outputs_.clear();
   versions_->SetNeedL0L1Compaction(false);
@@ -1007,6 +1010,7 @@ Status DBImpl::OpenCompactionOutputFile(CompactionState* compact) {
 #endif
       std::string level_str = std::to_string(compact->compaction->level());
       std::string fname_used_to_create = fname.substr(0,fname.size()-4) + "START" + level_str + "END.ldb";
+      // printf("fname_used_to_create is %s\n", fname_used_to_create.c_str());
       s = env_->NewWritableFile(fname_used_to_create, &compact->outfile);
   }
 
@@ -1531,7 +1535,8 @@ Status DBImpl::DoCompactionWork(CompactionState* compact,const InternalKeyCompar
   }
   VersionSet::LevelSummaryStorage tmp;
   Log(options_.info_log,
-      "compacted to: %s", versions_->LevelSummary(&tmp));
+    "compacted to: %s", versions_->LevelSummary(&tmp));
+  
   return status;
  }
 

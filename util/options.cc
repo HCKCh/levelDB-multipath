@@ -17,7 +17,7 @@ Options::Options()
       env(Env::Default()),
       info_log(nullptr),
       write_buffer_size(4<<20),//4
-      max_open_files(2000),//1000
+      max_open_files(100),//1000
       block_cache(nullptr),
       block_size(4096),
       block_restart_interval(16),

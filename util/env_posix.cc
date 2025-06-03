@@ -26,6 +26,7 @@
 #include <iostream>
 #include <filesystem>
 
+// #include "leveldb/options.h"
 #include "leveldb/env.h"
 #include "leveldb/slice.h"
 #include "port/port.h"
@@ -600,6 +601,10 @@ class PosixLockTable {
 class PosixEnv : public Env {
  public:
   PosixEnv();
+  // Options options_;  // 存儲 Options
+  // virtual void SetOptions(const Options& options) {
+  //   options_ = options;
+  // }
   virtual ~PosixEnv() {
     char msg[] = "Destroying Env::Default()\n";
     fwrite(msg, 1, sizeof(msg), stderr);
@@ -649,13 +654,13 @@ bool IsFileInPmemDir(const std::string& filepath, const std::string& pmemDirPath
     return false;
 }
 bool IsPmemFile(const std::string& fname) {
-    const std::string pmemDir = "/home/kcchiang/test/dbtest/";
+    const std::string pmemDir = "/home/kcchiang/test/dbtest/PMEM";
     
     if (fname.find(".ldb") != std::string::npos) { 
-       // std::cout << "Checking if file: " << fname << " is in PMEM directory..." << std::endl;
+        // std::cout << "Checking if file: " << fname << " is in PMEM directory..." << std::endl;
         //bool inDir = isFileInDirectory(fname, pmemDir);
         bool inDir = IsFileInPmemDir(fname, pmemDir);
-       // std::cout << "File is " << (inDir ? "" : "not ") << "in PMEM directory." << std::endl;
+        // std::cout << "File is " << (inDir ? "" : "not ") << "in PMEM directory." << std::endl;
         return inDir;
     }
     //std::cout << "File: " << fname << " does not have '.ldb' extension." << std::endl;
@@ -672,18 +677,19 @@ bool IsPmemFile(const std::string& fname) {
     timeinfo = localtime(&rawtime);
     strftime(time_buf, 30, "%x %X", timeinfo);
     //fprintf(log_fp, "[jc_log %s] SEQ access [%s] file number\n", time_buf, fname.c_str());
-
+    // printf("Hellow\n");
     if (IsPmemFile(fname)) {
-        //printf("Use PM sequential read\n");
+        printf("Use PM sequential read\n");
         *result = new PmemSequentialFile(fname);
         if (*result) {
+          printf("Failed to create PmemSequentialFile\n");
             return Status::OK();
         } else {
             return Status::IOError("Failed to create PmemSequentialFile\n");
         }
     } else {
         
-        //printf("Attempting to open file: %s\n", fname.c_str());
+        // printf("Attempting to open file: %s\n", fname.c_str());
 
         int fd = open(fname.c_str(), O_RDONLY);
         if (fd < 0) {
@@ -758,7 +764,7 @@ virtual Status NewRandomAccessFile(const std::string& fname,
             void* base = mmap(nullptr, size, PROT_READ, MAP_SHARED, fd, 0);
             if (base != MAP_FAILED) {
                 *result = new PosixMmapReadableFile(fname, base, size, &mmap_limit_);
-                printf("Use  map read\n");
+                // printf("Use  map read\n");
             } else {
                 s = PosixError(fname, errno);
             }
@@ -845,19 +851,17 @@ virtual Status NewRandomAccessFile(const std::string& fname,
                 split_index--;
         }
         std::string disk_path;
-        if (level_num > 3) { // the level_num is the original level?
-            disk_path = "/SSD";
-        } else {
+        if (level_num <2) { // the level_num is the original level?
             //printf("Level in Persistent memory\n");
             disk_path = "/PMEM";
-            const size_t defaultPmemFileSize = 20 * 1024 * 1024 ; 
+            // printf("Max file size: %zu\n", max_file_size);
+            const size_t defaultPmemFileSize = 20 * 1024 * 1024;  // 20MB
             // Create the full pmem path for the file
             std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
              // Use this full pmem path when creating PmemWritableFile
             *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
             //*result = new PmemWritableFile(fname_tmp, defaultPmemFileSize);  
             //printf(" NOW write in Persistent memory OK at path: %s \n", pmem_path.c_str());
-
             //  Create a symbolic link at the original location pointing to the PMEM file
             if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
                 
@@ -866,7 +870,7 @@ virtual Status NewRandomAccessFile(const std::string& fname,
             }
             return Status::OK();
         }
-        
+        disk_path = "/SSD";
         //std::string actual_fname = fname_tmp.substr(0, split_index) + "/OPTANE" + fname_tmp.substr(split_index);
         std::string actual_fname = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
         int tmp_fd = open(actual_fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);

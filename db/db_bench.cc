@@ -544,6 +544,9 @@ class Benchmark {
       if (method != nullptr) {
         RunBenchmark(num_threads, name, method);
       }
+      // HeapProfile();
+      PrintStats("leveldb.stats");
+      PrintStats("leveldb.sstables");
     }
   }
 

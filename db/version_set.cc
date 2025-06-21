@@ -1489,16 +1489,11 @@ Compaction* VersionSet::PickCompaction() {
       last_compaction_was_l0l0_ = false;
       //printf("last_compaction_was_l0l0_ = false\n");
     } else {
-
+      // Descripion: 
+      // This branch set flag for L0-to-L0 compation, 
+      // flat concept was triggered by this flag. << KCC
       c->set_is_l0_to_l0(true);
       last_compaction_was_l0l0_ = true;
-      //printf("last_compaction_was_l0l0_ = true\n");
-
-      // if(c->is_l0_to_l0()) {  
-      // // 這裡只是用來確認 flag 
-      //   printf("is_l0_to_l0_ is true\n");
-      //   }
-      ////  
       //CollectL1KeyRanges(c);
     }
 

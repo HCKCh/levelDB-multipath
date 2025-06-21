@@ -731,8 +731,17 @@ bool DBImpl::IsOverlapping(FileMetaData* l0_file, FileMetaData* l1_file) {
   return true;
 }
 
+// Description: 
+// This function perform all-to-all L0-L1 compation
+// Regarding Amber's thesis, it should perform higher overlapping rate SSTable 
+// to merge. However, in current implementation, it merge all the overlap keys
+// in L0.
+// It might incur extra overhead when more frequently perfrom all-to-all 
+// compation. << KCC
+// refee to Slide page. 20.
 void DBImpl::perform_l0l1_compaction() {
   // Check if L0-L1 compaction is needed
+  // Description: This flag is set when LSM tree have been performed
   bool is_l0l1_compaction_needed = versions_->NeedL0L1Compaction();
   // if (is_l0l1_compaction_needed) {
   //   printf("L0-L1 compaction is needed\n");
@@ -816,13 +825,18 @@ void DBImpl::perform_l0l1_compaction() {
         if (versions_->current() == nullptr) {
           return;
         }
-        printf("versions_->current() is %s\n", versions_->current()->DebugString().c_str());
+        // printf("versions_->current() is %s\n", versions_->current()->DebugString().c_str());
         //KCC try to fill up the version information 
         c->set_input_version(versions_->current());
         c->input_version_->Ref();
         CompactionState* compact = new CompactionState(c);
         
-        Status status = DoCompactionWork(compact); // KCC found here will induce segmentation fault
+        // Debug: 
+        // KCC found here will induce segmentation fault - Done.
+        // In some cases, the version is empty, and I fix it by using
+        // additional function when we read SST files. << KCC
+
+        Status status = DoCompactionWork(compact); 
         if (!status.ok()) {
           RecordBackgroundError(status);
         }
@@ -870,8 +884,8 @@ void DBImpl::BackgroundCompaction() {
         (m->begin ? m->begin->DebugString().c_str() : "(begin)"),
         (m->end ? m->end->DebugString().c_str() : "(end)"),
         (m->done ? "(end)" : manual_end.DebugString().c_str()));
-  } else if (is_l0l1_compaction_needed) { ////test one    
-    //Compation compation(&options_, 0);
+  } else if (is_l0l1_compaction_needed) { 
+    //Description: This branch determine the early compation << KCC
     perform_l0l1_compaction();
   } else {
     c = versions_->PickCompaction();
@@ -1114,7 +1128,9 @@ Status DBImpl::InstallCompactionResults(CompactionState* compact, bool is_l0_to_
     //          f->smallest.DebugString().c_str(),
     //          f->largest.DebugString().c_str());
     // }
-  
+
+    // Description: if compation executed on l0_to_l0, next compation will be executed
+    // on l0_to_l1 compation. << KCC 
     versions_->SetNeedL0L1Compaction(true);
     is_l0_to_l0 = false;
     //compact->compaction->set_is_l0_to_l0(false);

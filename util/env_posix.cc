@@ -852,26 +852,26 @@ virtual Status NewRandomAccessFile(const std::string& fname,
                 split_index--;
         }
         std::string disk_path;
-        // if (level_num <2) { // the level_num is the original level?
-        //     //printf("Level in Persistent memory\n");
-        //     disk_path = "/PMEM";
-        //     // printf("result = %s\n", fname_tmp.c_str());
-        //     const size_t defaultPmemFileSize = 21 * 1024 * 1024;  // 20MB
-        //     // Create the full pmem path for the file
-        //     std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
-        //      // Use this full pmem path when creating PmemWritableFile
-        //     *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
-        //     //*result = new PmemWritableFile(fname_tmp, defaultPmemFileSize);  
-        //     //printf(" NOW write in Persistent memory OK at path: %s \n", pmem_path.c_str());
-        //     //  Create a symbolic link at the original location pointing to the PMEM file
-        //     if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
-        //         
-        //         perror("Failed to create symbolic link"); 
-        //         printf("Error creating symbolic link: %s\n", strerror(errno));
-        //         return Status::IOError("Failed to create symbolic link");
-        //     }
-        //     return Status::OK();
-        // }
+        if (level_num <2) { // the level_num is the original level?
+            //printf("Level in Persistent memory\n");
+            disk_path = "/PMEM";
+            // printf("result = %s\n", fname_tmp.c_str());
+            const size_t defaultPmemFileSize = 21 * 1024 * 1024;  // 20MB
+            // Create the full pmem path for the file
+            std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
+             // Use this full pmem path when creating PmemWritableFile
+            *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
+            //*result = new PmemWritableFile(fname_tmp, defaultPmemFileSize);  
+            //printf(" NOW write in Persistent memory OK at path: %s \n", pmem_path.c_str());
+            //  Create a symbolic link at the original location pointing to the PMEM file
+            if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
+                
+                perror("Failed to create symbolic link"); 
+                printf("Error creating symbolic link: %s\n", strerror(errno));
+                return Status::IOError("Failed to create symbolic link");
+            }
+            return Status::OK();
+        }
         disk_path = "/SSD";
         //std::string actual_fname = fname_tmp.substr(0, split_index) + "/OPTANE" + fname_tmp.substr(split_index);
         std::string actual_fname = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);

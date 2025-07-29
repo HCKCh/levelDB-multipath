@@ -762,7 +762,6 @@ void DBImpl::perform_l0l1_compaction() {
   while(!l1_files.empty() && is_l0l1_compaction_needed){
     FileMetaData* l1_file = l1_files.front();
     l1_files.erase(l1_files.begin()); 
-    // printf("l1 file number: %llu\n", static_cast<unsigned long long>(l1_file->number));      
     // Check if the L1 file overlaps with any L0 files
     // If it does, we will perform L0-L1 compaction
     std::vector<FileMetaData*> l0_compact_group;
@@ -773,59 +772,29 @@ void DBImpl::perform_l0l1_compaction() {
       }
     
       if (processed_l0.find(l0_file->number) != processed_l0.end()) {
-        // printf("L0 file #%llu has already been processed. Skipping.\n",
-        //        static_cast<unsigned long long>(l0_file->number));
         continue;
       }
       if (IsOverlapping(l0_file, l1_file)) {
-        // printf("L0 file #%llu overlaps with L1 file #%llu\n",
-        //        static_cast<unsigned long long>(l0_file->number),
-        //        static_cast<unsigned long long>(l1_file->number));
         l0_compact_group.push_back(l0_file);
         processed_l0.insert(l0_file->number);
-      } 
-      // else {
-      //   printf("L0 file #%llu does not overlap with L1 file #%llu\n",
-      //          static_cast<unsigned long long>(l0_file->number),
-      //          static_cast<unsigned long long>(l1_file->number));
-      // }
+      }
     }
     if (!l0_compact_group.empty()) {
       InternalKey smallest, largest;
       versions_->GetRange(l0_compact_group, &smallest, &largest);
       std::vector<FileMetaData*> l1_inputs;
       versions_->current()->GetOverlappingInputs(1, &smallest, &largest, &l1_inputs);
-      // printf("smallest: %s, largest: %s\n",
-      //        smallest.user_key().ToString().c_str(),
-      //        largest.user_key().ToString().c_str());
       if (!l1_inputs.empty()) {
-        // printf("Performing L0-L1 Compaction for overlapping range\n");
         Compaction* c = new Compaction(&options_, 0); //KCC: this function error induced Compation error --> no version related information
 
         c->set_is_l0_to_l0(false); 
-        // fprintf(stderr, "input_version_: %p, vset_: %p\n", c->inputs_->, input_version_ ? input_version_->vset_ : nullptr);
         for (auto* f : l0_compact_group) {
           c->inputs_[0].push_back(f);
         }
         c->inputs_[1] = l1_inputs; 
-        // for (const auto& f : c->inputs_[0]) {
-        //   printf("c->inputs_[0]  File #%llu, size=%llu, range=[%s, %s]\n",
-        //           static_cast<unsigned long long>(f->number),
-        //           static_cast<unsigned long long>(f->file_size),
-        //           f->smallest.DebugString().c_str(),
-        //           f->largest.DebugString().c_str());
-        // }
-        // for (const auto& f : c->inputs_[1]) {
-        //   printf("c->inputs_[1]  File #%llu, size=%llu, range=[%s, %s]\n",
-        //           static_cast<unsigned long long>(f->number),
-        //           static_cast<unsigned long long>(f->file_size),
-        //           f->smallest.DebugString().c_str(),
-        //           f->largest.DebugString().c_str());
-        // }
         if (versions_->current() == nullptr) {
           return;
         }
-        // printf("versions_->current() is %s\n", versions_->current()->DebugString().c_str());
         //KCC try to fill up the version information 
         c->set_input_version(versions_->current());
         c->input_version_->Ref();

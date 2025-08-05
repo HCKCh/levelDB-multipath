@@ -60,9 +60,8 @@ static int count_rm_file = 0;
 
 static int open_read_only_file_limit = -1;
 static int mmap_limit = -1;
-
 static const size_t kBufSize = 65536;
-
+static bool is_log_to_pmem = false;
 static Status PosixError(const std::string& context, int err_number) {
   if (err_number == ENOENT) {
     return Status::NotFound(context, strerror(err_number));
@@ -610,7 +609,7 @@ class PosixEnv : public Env {
     fwrite(msg, 1, sizeof(msg), stderr);
     abort();
   }
-
+  
   //PMEM
 
 bool isFileInDirectory(const std::string& filepath, const std::string& directory) {
@@ -724,6 +723,9 @@ bool IsPmemFile(const std::string& fname) {
   // }
 
   //PMEM
+virtual void set_log_in_pmem(){
+  is_log_to_pmem = true;
+}
 virtual Status NewRandomAccessFile(const std::string& fname,
                                    RandomAccessFile** result) {
   
@@ -831,56 +833,72 @@ virtual Status NewRandomAccessFile(const std::string& fname,
     std::string ldb_fmt = "ldb";
     std::string log_fmt = "log";
     std::string name_fmt = fname.substr(fname.size() - 3);
-    if (!(name_fmt == ldb_fmt)) { // if not ldb file, store it in the main directory
-        fd = open(fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);
-        //fprintf(log_fp, "[jc_log %s] new file [%s] number %d\n", time_buf, fname.c_str(),  count_newfile);
-        //Log(options_.info_log, "[jc_log] new file [%s] number %d\n", fname.c_str(), count_newfile); //zjc 20180511
-    } else { //.ldb file, redirect by symbolic links !
-        int split_level = fname.find("START");
-        int split_level2 = fname.find("END");
-        std::string level_str = fname.substr(split_level + 5, split_level2);
-        int level_num = atoi(level_str.c_str());
-        // printf("level_str = %s level_num = %d\n", level_str.c_str(), level_num);
-        std::string fname_tmp = fname.substr(0, split_level) + fname.substr(split_level2 + 3, fname.size());
+    std::string disk_path;
+    if (name_fmt == log_fmt && is_log_to_pmem) { // if not ldb file, store it in the main directory
+      disk_path = "/PMEM";
+      std::string fname_tmp = fname;
+      const size_t defaultPmemFileSize = 21 * 1024 * 1024;  // 20MB
+      //printf("New log file [%s] number %d\n", fname.c_str(), count_newfile);
+      // 找到最後一個 '/' 的位置
+      int split_index = fname_tmp.find_last_of('/');
+      if (split_index == std::string::npos) {
+          return Status::InvalidArgument("Invalid filename format: missing '/'");
+      }
+      // 正確生成 pmem_path
+      std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
+      *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
+      if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
+          perror("Failed to create symbolic link"); 
+          printf("Error creating symbolic link: %s\n", strerror(errno));
+          return Status::IOError("Failed to create symbolic link");
+      }
+      return Status::OK();
+    } else 
+    if ((name_fmt == ldb_fmt)) { // if not ldb file, store it in the main directory
+      int split_level = fname.find("START");
+      int split_level2 = fname.find("END");
+      std::string level_str = fname.substr(split_level + 5, split_level2);
+      int level_num = atoi(level_str.c_str());
+      // printf("level_str = %s level_num = %d\n", level_str.c_str(), level_num);
+      std::string fname_tmp = fname.substr(0, split_level) + fname.substr(split_level2 + 3, fname.size());
 
-        int len = fname_tmp.size();
-        int split_index = len - 1;
-        while (split_index >= 0) {
-            if (fname_tmp[split_index] == '/')
-                break;
-            else
-                split_index--;
-        }
-        std::string disk_path;
-        if (level_num <2) { // the level_num is the original level?
-            //printf("Level in Persistent memory\n");
-            disk_path = "/PMEM";
-            // printf("result = %s\n", fname_tmp.c_str());
-            const size_t defaultPmemFileSize = 21 * 1024 * 1024;  // 20MB
-            // Create the full pmem path for the file
-            std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
-             // Use this full pmem path when creating PmemWritableFile
-            *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
-            //*result = new PmemWritableFile(fname_tmp, defaultPmemFileSize);  
-            //printf(" NOW write in Persistent memory OK at path: %s \n", pmem_path.c_str());
-            //  Create a symbolic link at the original location pointing to the PMEM file
-            if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
-                
-                perror("Failed to create symbolic link"); 
-                printf("Error creating symbolic link: %s\n", strerror(errno));
-                return Status::IOError("Failed to create symbolic link");
-            }
-            return Status::OK();
-        }
-        disk_path = "/SSD";
-        //std::string actual_fname = fname_tmp.substr(0, split_index) + "/OPTANE" + fname_tmp.substr(split_index);
-        std::string actual_fname = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
-        int tmp_fd = open(actual_fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);
-        close(tmp_fd);
-        symlinkat(actual_fname.c_str(), AT_FDCWD, fname_tmp.c_str());
-        fd = open(fname_tmp.c_str(), O_WRONLY, 0644);
-        // KCC //fprintf(log_fp, "[jc_log %s] new file (fname=%s)[%s]-->[%s] (level-%d) number %d\n", time_buf, fname.c_str(), fname_tmp.c_str(), actual_fname.c_str(), level_num, count_newfile);
-        //Log(options_.info_log, "[jc_log] new file (fname=%s)[%s]-->[%s] (level-%d) number %d\n", time_buf, fname.c_str(), fname_tmp.c_str(), actual_fname.c_str(), level_num, count_newfile); // zjc 20180511
+      int len = fname_tmp.size();
+      int split_index = len - 1;
+      while (split_index >= 0) {
+          if (fname_tmp[split_index] == '/')
+              break;
+          else
+              split_index--;
+      }
+      
+      if (level_num <2) { // the level_num is the original level?
+          disk_path = "/PMEM";
+          // printf("result = %s\n", fname_tmp.c_str());
+          const size_t defaultPmemFileSize = 21 * 1024 * 1024;  // 20MB
+          // Create the full pmem path for the file
+          std::string pmem_path = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
+           // Use this full pmem path when creating PmemWritableFile
+          *result = new PmemWritableFile(pmem_path, defaultPmemFileSize);
+          //*result = new PmemWritableFile(fname_tmp, defaultPmemFileSize);  
+          //printf(" NOW write in Persistent memory OK at path: %s \n", pmem_path.c_str());
+          //  Create a symbolic link at the original location pointing to the PMEM file
+          if (symlink(pmem_path.c_str(), fname_tmp.c_str()) != 0) {
+              perror("Failed to create symbolic link"); 
+              printf("Error creating symbolic link: %s\n", strerror(errno));
+              return Status::IOError("Failed to create symbolic link");
+          }
+          return Status::OK();
+      }
+      disk_path = "/SSD";
+      //std::string actual_fname = fname_tmp.substr(0, split_index) + "/OPTANE" + fname_tmp.substr(split_index);
+      std::string actual_fname = fname_tmp.substr(0, split_index) + disk_path + fname_tmp.substr(split_index);
+      int tmp_fd = open(actual_fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);
+      close(tmp_fd);
+      symlinkat(actual_fname.c_str(), AT_FDCWD, fname_tmp.c_str());
+      fd = open(fname_tmp.c_str(), O_WRONLY, 0644);
+    } else { //.ldb file, redirect by symbolic links !
+      // printf("New file [%s] number %d\n", fname.c_str(), count_newfile);  
+      fd = open(fname.c_str(), O_TRUNC | O_WRONLY | O_CREAT, 0644);
     }
     //zjc
 
@@ -935,21 +953,33 @@ virtual Status NewRandomAccessFile(const std::string& fname,
     count_rm_file++;
     std::string ldb_fmt = "ldb";
     std::string name_fmt = fname.substr(fname.size() - 3);
-    if (!(name_fmt == ldb_fmt)) { // if not ldb file, just delete it from the main directory
-        // fprintf(log_fp, "[jc_log %s] remove [%s] file number %d\n", time_buf, fname.c_str(),  count_rm_file);
-        if (unlink(fname.c_str()) != 0) {
-          result = PosixError(fname, errno);
-        }
+    if (name_fmt == "log" && is_log_to_pmem) { // if not ldb file, just delete it from the main directory
+      char real_name[256];
+      realpath(fname.c_str(), real_name);
+      // fprintf(log_fp, "[jc_log %s] remove [%s] --> [%s] file number %d\n", time_buf, fname.c_str(), real_name, count_rm_file);
+      if (unlink(real_name) != 0) {
+        result = PosixError(fname, errno);
+      }
+      if (unlink(fname.c_str()) != 0) {
+        result = PosixError(fname, errno);
+      }
+    } else
+    if (name_fmt == ldb_fmt) { // if not ldb file, just delete it from the main directory
+      char real_name[256];
+      realpath(fname.c_str(), real_name);
+      // fprintf(log_fp, "[jc_log %s] remove [%s] --> [%s] file number %d\n", time_buf, fname.c_str(), real_name, count_rm_file);
+      if (unlink(real_name) != 0) {
+        result = PosixError(fname, errno);
+      }
+      if (unlink(fname.c_str()) != 0) {
+        result = PosixError(fname, errno);
+      }
     } else { //.ldb file, redirect by symbolic links !
-        char real_name[256];
-        realpath(fname.c_str(), real_name);
-        // fprintf(log_fp, "[jc_log %s] remove [%s] --> [%s] file number %d\n", time_buf, fname.c_str(), real_name, count_rm_file);
-        if (unlink(real_name) != 0) {
-          result = PosixError(fname, errno);
-        }
-        if (unlink(fname.c_str()) != 0) {
-          result = PosixError(fname, errno);
-        }
+      // fprintf(log_fp, "[jc_log %s] remove [%s] file number %d\n", time_buf, fname.c_str(),  count_rm_file);
+      if (unlink(fname.c_str()) != 0) {
+        result = PosixError(fname, errno);
+      }
+      
     }
     //if (unlink(fname.c_str()) != 0) {
     //  result = PosixError(fname, errno);

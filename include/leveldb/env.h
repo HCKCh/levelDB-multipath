@@ -65,7 +65,7 @@ class LEVELDB_EXPORT Env {
   // The returned file may be concurrently accessed by multiple threads.
   virtual Status NewRandomAccessFile(const std::string& fname,
                                      RandomAccessFile** result) = 0;
-
+  
   // Create an object that writes to a new file with the specified
   // name.  Deletes any existing file with the same name and creates a
   // new file.  On success, stores a pointer to the new file in
@@ -166,6 +166,8 @@ class LEVELDB_EXPORT Env {
 
   // Sleep/delay the thread for the prescribed number of micro-seconds.
   virtual void SleepForMicroseconds(int micros) = 0;
+
+  virtual void set_log_in_pmem() = 0;
 };
 
 // A file abstraction for reading sequentially through a file
@@ -349,9 +351,12 @@ class LEVELDB_EXPORT EnvWrapper : public Env {
   void SleepForMicroseconds(int micros) override {
     target_->SleepForMicroseconds(micros);
   }
-
+  void set_log_in_pmem() override{
+    target_->set_log_in_pmem();
+  }
  private:
   Env* target_;
+
 };
 
 }  // namespace leveldb

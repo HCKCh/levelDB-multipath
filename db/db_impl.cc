@@ -808,8 +808,7 @@ void DBImpl::perform_l0l1_compaction() {
         Status status = DoCompactionWork(compact); 
         if (!status.ok()) {
           RecordBackgroundError(status);
-        }
-        
+        }        
         CleanupCompaction(compact);
         c->ReleaseInputs();
         DeleteObsoleteFiles();

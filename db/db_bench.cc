@@ -110,6 +110,8 @@ static bool FLAGS_use_existing_db = false;
 // If true, reuse existing log/MANIFEST files when re-opening a database.
 static bool FLAGS_reuse_logs = false;
 
+// Maximum number of files to keep open at the same time (use default if == 0)
+static int FLAGS_log_in_pmem = false;
 // Use the db with the following name.
 static const char* FLAGS_db = nullptr;
 
@@ -998,6 +1000,9 @@ int main(int argc, char** argv) {
       FLAGS_open_files = n;
     } else if (strncmp(argv[i], "--db=", 5) == 0) {
       FLAGS_db = argv[i] + 5;
+    } else if (strcmp(argv[i], "--log_in_pmem") == 0) {
+      FLAGS_log_in_pmem = true;
+      printf("You have enabled logging in persistent memory.\n");
     } else {
       fprintf(stderr, "Invalid flag '%s'\n", argv[i]);
       exit(1);
@@ -1005,14 +1010,15 @@ int main(int argc, char** argv) {
   }
 
   leveldb::g_env = leveldb::Env::Default();
-
+  
   // Choose a location for the test database if none given with --db=<path>
   if (FLAGS_db == nullptr) {
       leveldb::g_env->GetTestDirectory(&default_db_path);
       default_db_path += "/dbbench";
       FLAGS_db = default_db_path.c_str();
   }
-
+  if (FLAGS_log_in_pmem)
+    leveldb::g_env->set_log_in_pmem();
   leveldb::Benchmark benchmark;
   benchmark.Run();
   return 0;
